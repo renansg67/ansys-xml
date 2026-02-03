@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="Ansys Material Dashboard", page_icon="🏗️", layout="wide")
@@ -13,6 +14,14 @@ class AnsysXMLConverter:
             "pa14": "E_x", "pa15": "E_y", "pa16": "E_z",
             "pa17": "Poisson_xy", "pa18": "Poisson_yz", "pa19": "Poisson_xz",
             "pa20": "G_xy", "pa21": "G_yz", "pa22": "G_xz"
+        }
+        
+        # Mapeamento de versões comerciais para versões técnicas do XML
+        self.version_map = {
+            "2024 R1": "24.1.0.0",
+            "2024 R2": "24.2.0.0",
+            "2025 R1": "25.1.0.0",
+            "2025 R2": "25.2.0.233"
         }
 
     def clean_numeric(self, value):
@@ -27,11 +36,15 @@ class AnsysXMLConverter:
                 return 0.0
         return float(value)
 
-    def _get_xml_header(self):
+    def _get_xml_header(self, ui_version):
+        """Gera o cabeçalho dinâmico baseado na versão selecionada."""
+        tech_version = self.version_map.get(ui_version, "25.2.0.233")
+        current_date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<EngineeringData version="25.2.0.233" versiondate="12/06/2025 11:41:00">\n'
-            '  <Notes>Gerado via Streamlit - UTF-8 - Suporta Ortotropia</Notes>\n'
+            f'<EngineeringData version="{tech_version}" versiondate="{current_date}">\n'
+            f'  <Notes>Gerado via Streamlit - Versão Ansys {ui_version} - Suporta Ortotropia</Notes>\n'
             '  <Materials>\n    <MatML_Doc>\n'
         )
 
@@ -92,8 +105,9 @@ class AnsysXMLConverter:
         block += '          </PropertyData>\n        </BulkDetails>\n      </Material>\n'
         return block
 
-    def convert(self, df):
-        xml_out = self._get_xml_header()
+    def convert(self, df, ui_version):
+        """Recebe a versão da interface e aplica no header."""
+        xml_out = self._get_xml_header(ui_version)
         for _, row in df.iterrows():
             xml_out += self.build_material_block(row)
         xml_out += self._get_xml_footer()
@@ -102,9 +116,10 @@ class AnsysXMLConverter:
 # --- Interface Streamlit ---
 
 st.title("📊 Ansys Material Dashboard & XML Generator")
-st.markdown("Converta planilhas brasileiras em arquivos de engenharia para o Ansys Workbench/Autodyn.")
+st.markdown("Converta planilhas em arquivos de engenharia para o Ansys Workbench/Autodyn.")
 
 uploaded_file = st.file_uploader("Upload do arquivo CSV (Use codificação UTF-8)", type="csv")
+ansys_version = st.selectbox("Versão do Ansys", ["2024 R1", "2024 R2", "2025 R1", "2025 R2"])
 
 if uploaded_file:
     # 1. Leitura e Limpeza
@@ -134,7 +149,7 @@ if uploaded_file:
         fig_ashby = px.scatter(df_plot, x="Densidade", y="E_x", text="Nome", color="Tipo",
                                log_y=True, template="plotly_dark",
                                labels={"E_x": "Módulo de Young (Pa)", "Densidade": "Densidade (kg/m³)"})
-        st.plotly_chart(fig_ashby, use_container_width=True)
+        st.plotly_chart(fig_ashby)
 
     with col_b:
         st.subheader("📐 Anisotropia Direcional")
@@ -149,7 +164,7 @@ if uploaded_file:
                 fig_polar.add_trace(go.Scatterpolar(r=r_vals, theta=theta, fill='toself', name=row['Nome']))
             
             fig_polar.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=True, tickformat=".1e")))
-            st.plotly_chart(fig_polar, use_container_width=True)
+            st.plotly_chart(fig_polar)
         else:
             st.info("Adicione materiais 'Orthotropic' para ver o gráfico polar.")
 
@@ -157,12 +172,13 @@ if uploaded_file:
     st.divider()
     st.subheader("💾 Exportação de Dados")
     if st.button("🚀 Gerar XML para Ansys"):
-        final_xml = converter.convert(df)
-        st.success("XML gerado com sucesso com tratamento de vírgulas e acentos!")
+        # Passando a variável ansys_version para a função convert
+        final_xml = converter.convert(df, ansys_version)
+        st.success(f"XML gerado com sucesso para Ansys {ansys_version}!")
         st.download_button(
             label="📥 Baixar arquivo .xml",
             data=final_xml.encode('utf-8'),
-            file_name="EngineeringData_Dashboard.xml",
+            file_name=f"EngineeringData_{ansys_version.replace(' ', '_')}.xml",
             mime="text/xml"
         )
 
